@@ -11,7 +11,7 @@ on:
       jobs:
         description: 'Ninja parallel jobs'
         required: false
-        default: '4'
+        default: '8'
 
 jobs:
   build:
