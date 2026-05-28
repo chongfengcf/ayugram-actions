@@ -1,0 +1,81 @@
+name: Build AyuGram
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'AyuGram branch to build'
+        required: false
+        default: 'dev'
+      jobs:
+        description: 'Ninja parallel jobs'
+        required: false
+        default: '4'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout AyuGram source
+        uses: actions/checkout@v4
+        with:
+          repository: AyuGram/AyuGramDesktop
+          ref: ${{ github.event.inputs.branch || 'dev' }}
+          submodules: recursive
+
+      - name: Get upstream build scripts
+        run: |
+          git clone --depth 1 https://github.com/telegramdesktop/tdesktop.git /tmp/tdesktop-upstream
+          cp -r /tmp/tdesktop-upstream/Telegram/build Telegram/
+          rm -rf /tmp/tdesktop-upstream
+          ls Telegram/configure.sh || echo "WARNING: configure.sh missing"
+
+      - name: Pull centos_env image
+        run: |
+          docker pull ghcr.io/telegramdesktop/tdesktop/centos_env:latest
+          docker images ghcr.io/telegramdesktop/tdesktop/centos_env
+
+      - name: Build AyuGram
+        env:
+          JOBS: ${{ github.event.inputs.jobs || '4' }}
+        run: |
+          echo "=== Build start: $(date) ==="
+          echo "JOBS=$JOBS"
+          docker run --rm \
+            -v $PWD:/usr/src/tdesktop \
+            -e CMAKE_BUILD_PARALLEL_LEVEL=$JOBS \
+            ghcr.io/telegramdesktop/tdesktop/centos_env:latest \
+            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+            -D TDESKTOP_API_ID=${{ secrets.TDESKTOP_API_ID }} \
+            -D TDESKTOP_API_HASH=${{ secrets.TDESKTOP_API_HASH }} \
+            2>&1 | tee build.log
+          echo "=== Build end: $(date) ==="
+
+      - name: Check output
+        run: |
+          echo "=== Build artifacts ==="
+          find out -type f -executable -ls 2>/dev/null || echo "No executables found in out/"
+          ls -lh out/Release/ 2>/dev/null || echo "No out/Release/"
+          echo "=== build.log tail ==="
+          tail -50 build.log
+
+      - name: Upload AyuGram binary
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-linux-x64
+          path: |
+            out/Release/AyuGram
+            build.log
+          retention-days: 7
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-failed
+          path: build.log
+          retention-days: 7
