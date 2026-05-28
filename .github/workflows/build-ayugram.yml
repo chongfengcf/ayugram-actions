@@ -40,7 +40,7 @@ jobs:
 
       - name: Build AyuGram
         env:
-          JOBS: ${{ github.event.inputs.jobs || '4' }}
+          JOBS: ${{ github.event.inputs.jobs || '8' }}
         run: |
           echo "=== Build start: $(date) ==="
           echo "JOBS=$JOBS"
@@ -59,16 +59,71 @@ jobs:
           echo "=== Build artifacts ==="
           find out -type f -executable -ls 2>/dev/null || echo "No executables found in out/"
           ls -lh out/Release/ 2>/dev/null || echo "No out/Release/"
+          echo "=== ldd ==="
+          ldd out/Release/AyuGram 2>/dev/null || echo "ldd failed"
           echo "=== build.log tail ==="
           tail -50 build.log
 
-      - name: Upload AyuGram binary
+      - name: Package as AppImage
+        if: success()
+        run: |
+          set -e
+          echo "=== Packaging AppImage ==="
+          APPDIR=AyuGram.AppDir
+          mkdir -p "$APPDIR/usr/bin"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          mkdir -p "$APPDIR/usr/share/applications"
+
+          cp out/Release/AyuGram "$APPDIR/usr/bin/"
+          chmod +x "$APPDIR/usr/bin/AyuGram"
+
+          # AppRun
+          cat > "$APPDIR/AppRun" << 'APPRUN'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export PATH="${HERE}/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/usr/bin/AyuGram" "$@"
+          APPRUN
+          chmod +x "$APPDIR/AppRun"
+
+          # Desktop entry
+          cat > "$APPDIR/usr/share/applications/ayugram.desktop" << 'DESKTOP'
+          [Desktop Entry]
+          Name=AyuGram
+          Comment=Telegram Desktop fork with extra features
+          Exec=AyuGram
+          Icon=ayugram
+          Type=Application
+          Categories=Network;InstantMessaging;
+          DESKTOP
+
+          # Icon
+          ICON=$(find Telegram/Resources -name "icon256.png" 2>/dev/null | head -1)
+          [ -z "$ICON" ] && ICON=$(find Telegram/Resources -name "icon*.png" 2>/dev/null | head -1)
+          if [ -n "$ICON" ]; then
+            cp "$ICON" "$APPDIR/usr/share/icons/hicolor/256x256/apps/ayugram.png"
+            echo "Icon: $ICON"
+          else
+            echo "WARNING: no icon found"
+          fi
+
+          # Download appimagetool
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run "$APPDIR" AyuGram-x86_64.AppImage
+
+          echo "=== AppImage done ==="
+          ls -lh AyuGram-x86_64.AppImage
+
+      - name: Upload AyuGram
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: AyuGram-linux-x64
           path: |
             out/Release/AyuGram
+            AyuGram-x86_64.AppImage
             build.log
           retention-days: 7
 
